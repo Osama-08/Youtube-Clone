@@ -5,6 +5,8 @@ import {uploadonCloudinary} from '../utils/cloudinary.js';
 import { ApiResponse } from '../utils/ApiResponse.js';
 import jwt from 'jsonwebtoken';
 import { mongo } from 'mongoose';
+import { Subscription } from "../models/subscription.model.js";
+import mongoose from "mongoose";
 const generateAccessAndRefreshTokens = async(userId) => {
     try{
     const user = await User.findById(userId);
@@ -60,18 +62,9 @@ const registerUser=asyncHandler(async (req, res) => {
         password,
         avatar:avatar.url,
         coverImage:coverImage?.url || null
-    }).then((user)=>{
-        user.password=undefined;
-        res.status(201).json({
-            success:true,
-            message:"User registered successfully",
-            user
-        })
-    }).catch((error)=>{
-        throw new ApiError(500, "Failed to register user");
-    })
+    });
 
-    const createdUser=await User.findById(User._id).select("-password -refreshToken");
+    const createdUser=await User.findById(user._id).select("-password -refreshToken");
     if(!createdUser){
         throw new ApiError(500, "Failed to create user");
     }
@@ -126,11 +119,16 @@ const registerUser=asyncHandler(async (req, res) => {
 const loginUser = asyncHandler(async (req, res) => {
     const { username, email, password } = req.body;
 
-    if ((!username && !email) || !password) {
+    // Build query only with non-empty fields
+    const query = [];
+    if (username && username.trim() !== "") query.push({ username });
+    if (email && email.trim() !== "") query.push({ email });
+
+    if (!query.length || !password) {
         throw new ApiError(400, "Username or Email and Password are required");
     }
 
-    const user = await User.findOne({ $or: [{ username }, { email }] });
+    const user = await User.findOne({ $or: query });
     if (!user) {
         throw new ApiError(404, "User not found");
     }
@@ -159,7 +157,12 @@ const loginUser = asyncHandler(async (req, res) => {
     user.password = undefined;
     user.refreshToken = undefined;
 
-    return res.status(200).json(new ApiResponse(200, { user }, "User logged in successfully"));
+    // Send a clear message for frontend display
+    return res.status(200).json({
+        success: true,
+        message: "User logged in successfully!",
+        user
+    });
 });
 
 const logoutUser = asyncHandler(async (req, res) => {
@@ -279,50 +282,41 @@ const UpdateAccountDetails = asyncHandler(async (req, res) => {
 })
 
 const updateUserAvatar = asyncHandler(async (req, res) => {
-     
-    const avatarLocalPath = req.file?.avatar[0]?.path;
+    // Support both multer single and fields
+    const avatarLocalPath = req.files?.avatar?.[0]?.path || req.file?.path;
     if (!avatarLocalPath) {
-        throw new ApiError(400, "Avatar is required");
+        // No avatar uploaded, skip update
+        return res.status(200).json(new ApiResponse(200, null, "No avatar uploaded, nothing to update"));
     }
-
     const avatar = await uploadonCloudinary(avatarLocalPath);
     if (!avatar.url) {
         throw new ApiError(500, "Failed to upload avatar");
     }
-    
-
     const user = await User.findByIdAndUpdate(
         req.user._id,
         { $set: { avatar: avatar.url } },
         { new: true }
     ).select("-password");
-
     return res.status(200).json(new ApiResponse(200, user, "Avatar updated successfully"));
+});
 
-
-})
 const updateUserCoverImage = asyncHandler(async (req, res) => {
-     
-    const CoverImageLocalPath = req.file?.path;
-    if (!CoverImageLocalPath) {
-        throw new ApiError(400, "CoverImage is required");
+    const coverImageLocalPath = req.files?.coverImage?.[0]?.path || req.file?.path;
+    if (!coverImageLocalPath) {
+        // No cover image uploaded, skip update
+        return res.status(200).json(new ApiResponse(200, null, "No cover image uploaded, nothing to update"));
     }
-
-    const coverImage = await uploadonCloudinary(CoverImageLocalPath);
+    const coverImage = await uploadonCloudinary(coverImageLocalPath);
     if (!coverImage.url) {
         throw new ApiError(500, "Failed to upload CoverImage");
     }
-    
-
     const user = await User.findByIdAndUpdate(
         req.user._id,
-        { $set: { coverImage:coverImage.url } },
+        { $set: { coverImage: coverImage.url } },
         { new: true }
     ).select("-password");
-
     return res.status(200).json(new ApiResponse(200, user, "CoverImage updated successfully"));
-
-})
+});
 
 const getUserChannelProfile = asyncHandler(async (req, res) => {
       const {username}=req.params;
@@ -431,6 +425,29 @@ const getWatchHistory = asyncHandler(async (req, res) => {
 
 })
 
+// Subscribe to a channel
+const subscribeToChannel = asyncHandler(async (req, res) => {
+  const { channelId } = req.body;
+  if (!channelId) throw new ApiError(400, "Channel ID is required");
+  if (channelId === req.user._id.toString()) throw new ApiError(400, "Cannot subscribe to yourself");
+
+  const existing = await Subscription.findOne({ subcriber: req.user._id, channel: channelId });
+  if (existing) throw new ApiError(409, "Already subscribed");
+
+  await Subscription.create({ subcriber: req.user._id, channel: channelId });
+  const count = await Subscription.countDocuments({ channel: channelId });
+  return res.status(200).json(new ApiResponse(200, { isSubscribed: true, subcribersCount: count }, "Subscribed successfully"));
+});
+
+// Unsubscribe from a channel
+const unsubscribeFromChannel = asyncHandler(async (req, res) => {
+  const { channelId } = req.body;
+  if (!channelId) throw new ApiError(400, "Channel ID is required");
+  await Subscription.deleteOne({ subcriber: req.user._id, channel: channelId });
+  const count = await Subscription.countDocuments({ channel: channelId });
+  return res.status(200).json(new ApiResponse(200, { isSubscribed: false, subcribersCount: count }, "Unsubscribed successfully"));
+});
+
 
 export {
     registerUser,
@@ -443,5 +460,7 @@ export {
     updateUserAvatar,
     updateUserCoverImage ,
     getUserChannelProfile ,
-    getWatchHistory
+    getWatchHistory,
+    subscribeToChannel,
+    unsubscribeFromChannel
 }

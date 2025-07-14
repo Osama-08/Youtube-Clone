@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { loginUser, logoutUser, registerUser ,refreshAccessToken, changeCurrentPassword, getCurrentUser, UpdateAccountDetails, updateUserAvatar, updateUserCoverImage, getUserChannelProfile,getWatchHistory} from "../controllers/user_controller.js";
+import { loginUser, logoutUser, registerUser ,refreshAccessToken, changeCurrentPassword, getCurrentUser, UpdateAccountDetails, updateUserAvatar, updateUserCoverImage, getUserChannelProfile,getWatchHistory, subscribeToChannel, unsubscribeFromChannel} from "../controllers/user_controller.js";
 import { upload } from "../middelware/multer.middelware.js";
 import {  verifyJWT } from "../middelware/auth.middleware.js";
 const router = Router();
@@ -35,8 +35,9 @@ router.route("/cover-Image").patch(verifyJWT,upload.single("coverImage"),updateU
 router.route("/c/:username").get(verifyJWT,getUserChannelProfile)
 router.route("/watch-history").get(verifyJWT, getWatchHistory);
 
-
-
+// Subscription routes
+router.post("/subscribe", verifyJWT, subscribeToChannel);
+router.post("/unsubscribe", verifyJWT, unsubscribeFromChannel);
 
 
 export default router;
